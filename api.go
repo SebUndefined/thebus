@@ -9,3 +9,16 @@ type Bus interface {
 	Close() error
 	Stats() (StatsResults, error)
 }
+
+type Logger interface {
+	Info(msg string, kv ...any)
+	Error(msg string, kv ...any)
+	Debug(msg string, kv ...any)
+}
+
+type MetricsHooks interface {
+	IncPublished(topic string)
+	IncDelivered(topic string)
+	IncDropped(topic string)
+	IncFailed(topic string)
+}
