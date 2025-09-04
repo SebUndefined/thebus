@@ -102,6 +102,22 @@ func DefaultConfig() *Config {
 	}
 }
 
+type SubscriptionConfig struct {
+	Strategy    SubscriptionStrategy
+	BufferSize  int
+	SendTimeout time.Duration
+	DropIfFull  bool
+}
+
+func DefaultSubscriptionConfig() SubscriptionConfig {
+	return SubscriptionConfig{
+		BufferSize:  128,
+		SendTimeout: 200 * time.Millisecond,
+		DropIfFull:  true,
+		Strategy:    SubscriptionStrategyPayloadShared,
+	}
+}
+
 // ##############################################################################
 // ###############################   OPTIONS   ##################################
 // ##############################################################################
@@ -179,4 +195,33 @@ func BuildConfig(opts ...Option) *Config {
 		opt(cfg)
 	}
 	return cfg
+}
+
+// SubscribeOption -
+type SubscribeOption func(subCfg *SubscriptionConfig)
+
+func WithStrategy(strategy SubscriptionStrategy) SubscribeOption {
+	return func(subCfg *SubscriptionConfig) {
+		subCfg.Strategy = strategy
+	}
+}
+
+func WithBufferSize(bufferSize int) SubscribeOption {
+	return func(subCfg *SubscriptionConfig) {
+		if bufferSize < 1 {
+			return
+		}
+		subCfg.BufferSize = bufferSize
+	}
+}
+func WithSendTimeout(timeout time.Duration) SubscribeOption {
+	return func(subCfg *SubscriptionConfig) {
+		subCfg.SendTimeout = timeout
+	}
+}
+
+func WithDropIfFull(dropIfFull bool) SubscribeOption {
+	return func(subCfg *SubscriptionConfig) {
+		subCfg.DropIfFull = dropIfFull
+	}
 }
