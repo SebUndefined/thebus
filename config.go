@@ -72,6 +72,7 @@ type Config struct {
 	AutoDeleteEmptyTopics bool          // default: true
 	TopicIdleTTL          time.Duration // if Janitor enabled (0 = off)
 	JanitorInterval       time.Duration // 0 = off
+	IDGenerator           IDGenerator   // default to DefaultIDGenerator
 
 	// Default for subscribers (peuvent être override par Subscribe options)
 	DefaultSubBufferSize int                  // default: 128
@@ -99,22 +100,7 @@ func DefaultConfig() *Config {
 		DefaultSendTimeout:    200 * time.Millisecond,
 		DefaultDropIfFull:     true,
 		DefaultStrategy:       SubscriptionStrategyPayloadShared,
-	}
-}
-
-type SubscriptionConfig struct {
-	Strategy    SubscriptionStrategy
-	BufferSize  int
-	SendTimeout time.Duration
-	DropIfFull  bool
-}
-
-func DefaultSubscriptionConfig() SubscriptionConfig {
-	return SubscriptionConfig{
-		BufferSize:  128,
-		SendTimeout: 200 * time.Millisecond,
-		DropIfFull:  true,
-		Strategy:    SubscriptionStrategyPayloadShared,
+		IDGenerator:           DefaultIDGenerator,
 	}
 }
 
@@ -189,39 +175,16 @@ func WithPanicHandler(handler func(topic string, v any)) Option {
 	}
 }
 
+func (cfg *Config) WithIDGenerator(IDGenerator IDGenerator) Option {
+	return func(cfg *Config) {
+		cfg.IDGenerator = IDGenerator
+	}
+}
+
 func BuildConfig(opts ...Option) *Config {
 	cfg := DefaultConfig()
 	for _, opt := range opts {
 		opt(cfg)
 	}
 	return cfg
-}
-
-// SubscribeOption -
-type SubscribeOption func(subCfg *SubscriptionConfig)
-
-func WithStrategy(strategy SubscriptionStrategy) SubscribeOption {
-	return func(subCfg *SubscriptionConfig) {
-		subCfg.Strategy = strategy
-	}
-}
-
-func WithBufferSize(bufferSize int) SubscribeOption {
-	return func(subCfg *SubscriptionConfig) {
-		if bufferSize < 1 {
-			return
-		}
-		subCfg.BufferSize = bufferSize
-	}
-}
-func WithSendTimeout(timeout time.Duration) SubscribeOption {
-	return func(subCfg *SubscriptionConfig) {
-		subCfg.SendTimeout = timeout
-	}
-}
-
-func WithDropIfFull(dropIfFull bool) SubscribeOption {
-	return func(subCfg *SubscriptionConfig) {
-		subCfg.DropIfFull = dropIfFull
-	}
 }
