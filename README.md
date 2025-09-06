@@ -9,15 +9,19 @@ thebus is a lightweight message-oriented middleware that provides a dead-simple 
 Just install **thebus** in your project by using the following command. 
 
 ```shell
-go get -u github.com/sebundefined/thebus
+go get -u github.com/sebundefined/thebus/v1
 ```
 ## Example Usage
+
+### Simple
 
 ```go
 package main
 
 
 ```
+
+### With custom options
 
 
 ## Features
