@@ -1,12 +1,23 @@
 package thebus
 
-import "time"
+import (
+	"sync"
+	"sync/atomic"
+	"time"
+)
 
 type Subscription interface {
 	GetID() string
 	GetTopic() string
 	Read() <-chan Message
 	Unsubscribe() error
+}
+
+type SubscriptionConfig struct {
+	Strategy    SubscriptionStrategy
+	BufferSize  int
+	SendTimeout time.Duration
+	DropIfFull  bool
 }
 
 type subscription struct {
@@ -16,13 +27,6 @@ type subscription struct {
 	messageChan     chan Message
 	messages        <-chan Message
 	unsubscribeFunc func() error
-}
-
-type SubscriptionConfig struct {
-	Strategy    SubscriptionStrategy
-	BufferSize  int
-	SendTimeout time.Duration
-	DropIfFull  bool
 }
 
 func DefaultSubscriptionConfig() SubscriptionConfig {
@@ -79,4 +83,14 @@ func WithDropIfFull(dropIfFull bool) SubscribeOption {
 	return func(subCfg *SubscriptionConfig) {
 		subCfg.DropIfFull = dropIfFull
 	}
+}
+
+type topicState struct {
+	subs     map[string]*subscription
+	started  atomic.Bool
+	counters atomicCounters
+	inQueue  chan messageRef
+	seq      atomic.Uint64
+	wg       sync.WaitGroup
+	closed   atomic.Bool
 }

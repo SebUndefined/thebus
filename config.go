@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+const (
+	DefaultTopicQueueSize = 1024
+)
+
 // ##############################################################################
 // ##################################   ENUM   ##################################
 // ##############################################################################
@@ -92,7 +96,7 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		TopicQueueSize:        1024,
+		TopicQueueSize:        DefaultTopicQueueSize,
 		AutoDeleteEmptyTopics: true,
 		TopicIdleTTL:          0 * time.Second,
 		JanitorInterval:       0 * time.Second,
