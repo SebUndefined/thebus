@@ -175,10 +175,17 @@ func WithPanicHandler(handler func(topic string, v any)) Option {
 	}
 }
 
-func (cfg *Config) WithIDGenerator(IDGenerator IDGenerator) Option {
+func WithIDGenerator(IDGenerator IDGenerator) Option {
 	return func(cfg *Config) {
 		cfg.IDGenerator = IDGenerator
 	}
+}
+
+func (cfg *Config) Validate() error {
+	if cfg.IDGenerator == nil {
+		return ErrIDGeneratorNotSet
+	}
+	return nil
 }
 
 func BuildConfig(opts ...Option) *Config {
