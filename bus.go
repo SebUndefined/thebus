@@ -3,6 +3,7 @@ package thebus
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -43,8 +44,72 @@ func (b *bus) Publish(topic string, data []byte) (PublishAck, error) {
 }
 
 func (b *bus) Subscribe(ctx context.Context, topic string, opts ...SubscribeOption) (Subscription, error) {
-	//TODO implement me
-	panic("implement me")
+	// Standard checks
+	if !b.open.Load() {
+		return nil, ErrClosed
+	}
+	if len(strings.TrimSpace(topic)) == 0 {
+		return nil, ErrInvalidTopic
+	}
+
+	// Building the config based on the default one
+	// (check in the future the default @SebUndefined)
+	cfg := BuildSubscriptionConfig(opts...).Normalize()
+
+	// Building the subscription
+	id := b.cfg.IDGenerator()
+	msgChan := make(chan Message, cfg.BufferSize)
+	sub := &subscription{
+		subscriptionID: id,
+		cfg:            cfg,
+		topic:          topic,
+		messageChan:    msgChan,
+		messages:       (<-chan Message)(msgChan),
+	}
+	// Saving, function under lock so ok
+	err := b.withWriteState(topic, true, func(state *topicState) error {
+		// Recheck in case of closed before the first lock
+		// It is possible that someone close it pending we wait for the first lock
+		// I do it for avoiding weird state....
+		if !b.open.Load() {
+			// unlock useless here because it is handled by withWriteState
+			return ErrClosed
+		}
+		if b.cfg.MaxSubscribersPerTopic > 0 && len(state.subs) >= b.cfg.MaxSubscribersPerTopic {
+			return fmt.Errorf("too many subscribers per topic (max: %d)", b.cfg.MaxSubscribersPerTopic)
+		}
+		state.subs[id] = sub
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sub.unsubscribeFunc = b.buildUnsubscribeFunction(id, topic)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = sub.Unsubscribe() // idempotent
+		}
+	}()
+
+	return sub, nil
+}
+
+func (b *bus) buildUnsubscribeFunction(id string, topic string) func() error {
+	return func() error {
+		b.mutex.Lock()
+		if state, ok := b.subscriptions[topic]; ok {
+			delete(state.subs, id)
+			if len(state.subs) == 0 && len(state.inQueue) == 0 {
+				if state.closed.CompareAndSwap(false, true) { // ← garde-fou
+					close(state.inQueue)
+					delete(b.subscriptions, topic)
+				}
+			}
+		}
+		b.mutex.Unlock()
+		return nil
+	}
 }
 
 func (b *bus) Unsubscribe(topic string, subscriberID string) error {
@@ -62,44 +127,54 @@ func (b *bus) Stats() (StatsResults, error) {
 	panic("implement me")
 }
 
-// getStateReadLocked
-// Caller must hold RLock.
-func (b *bus) getStateReadLocked(topic string) (*topicState, bool) {
-	state, ok := b.subscriptions[topic]
-	return state, ok
+func (b *bus) snapshotState(topic string) (*topicState, int, bool) {
+	b.mutex.RLock()
+	subsCount := 0
+	st, ok := b.subscriptions[topic]
+	if ok {
+		subsCount = len(st.subs)
+	}
+	b.mutex.RUnlock()
+	return st, subsCount, ok
 }
 
-// getOrCreateStateLocked ensure that the state for a specific topic is initialized.
-// If the topic is found, it returns it otherwise, it creates a new one.
-// getOrCreateStateLocked start the fanOut method automatically.
-// Caller must hold Lock.
-func (b *bus) getOrCreateStateLocked(topic string) (*topicState, bool, error) {
+func (b *bus) withReadState(topic string, callback func(st *topicState) error) error {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	return callback(b.subscriptions[topic])
+}
+
+func (b *bus) withWriteState(topic string, createIfNotExists bool, writeFunc func(state *topicState) error) error {
+	b.mutex.Lock()
 	state, ok := b.subscriptions[topic]
-	created := false
+	start := false
 	if !ok {
+		if !createIfNotExists {
+			err := writeFunc(nil)
+			b.mutex.Unlock()
+			return err
+		}
 		if b.cfg.MaxTopics > 0 && len(b.subscriptions) >= b.cfg.MaxTopics {
-			return nil,
-				false,
-				fmt.Errorf("too many topics (max=%d)", b.cfg.MaxTopics)
+			b.mutex.Unlock()
+			return fmt.Errorf("too many topics (max=%d)", b.cfg.MaxTopics)
 		}
-		created = true
-		// Create the chanel. Apply default in case of bad config
-		var queue chan messageRef
-		if b.cfg.TopicQueueSize <= 0 {
-			queue = make(chan messageRef, DefaultTopicQueueSize)
-		} else {
-			queue = make(chan messageRef, b.cfg.TopicQueueSize)
+		qSize := b.cfg.TopicQueueSize
+		if qSize <= 0 {
+			qSize = DefaultTopicQueueSize
 		}
-		state = &topicState{
-			subs:     make(map[string]*subscription),
-			counters: atomicCounters{},
-			inQueue:  queue,
-		}
+		state = newTopicState(qSize)
+		// add the state
 		b.subscriptions[topic] = state
+
 		if state.started.CompareAndSwap(false, true) {
 			state.wg.Add(1)
-			// TODO run the fanout like go l.runFanOut(topic, state)
+			start = true
 		}
 	}
-	return state, created, nil
+	err := writeFunc(state)
+	b.mutex.Unlock()
+	if start {
+		go b.runFanOut(topic, state)
+	}
+	return err
 }

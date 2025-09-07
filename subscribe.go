@@ -20,6 +20,19 @@ type SubscriptionConfig struct {
 	DropIfFull  bool
 }
 
+func (cfg SubscriptionConfig) Normalize() SubscriptionConfig {
+	if !cfg.Strategy.IsValid() {
+		cfg.Strategy = SubscriptionStrategyPayloadShared
+	}
+	if cfg.BufferSize < 1 {
+		cfg.BufferSize = 128
+	}
+	if cfg.SendTimeout <= 0 {
+		cfg.DropIfFull = true
+	}
+	return cfg
+}
+
 type subscription struct {
 	subscriptionID  string
 	cfg             SubscriptionConfig
@@ -53,6 +66,9 @@ func (s *subscription) Read() <-chan Message {
 }
 
 func (s *subscription) Unsubscribe() error {
+	if s.unsubscribeFunc == nil {
+		return nil
+	}
 	return s.unsubscribeFunc()
 }
 
@@ -85,6 +101,14 @@ func WithDropIfFull(dropIfFull bool) SubscribeOption {
 	}
 }
 
+func BuildSubscriptionConfig(opts ...SubscribeOption) SubscriptionConfig {
+	cfg := DefaultSubscriptionConfig()
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg
+}
+
 type topicState struct {
 	subs     map[string]*subscription
 	started  atomic.Bool
@@ -93,4 +117,17 @@ type topicState struct {
 	seq      atomic.Uint64
 	wg       sync.WaitGroup
 	closed   atomic.Bool
+}
+
+func newTopicState(queueSize int) *topicState {
+	var queue chan messageRef
+	if queueSize <= 0 {
+		queue = make(chan messageRef, DefaultTopicQueueSize)
+	} else {
+		queue = make(chan messageRef, queueSize)
+	}
+	return &topicState{
+		subs:    make(map[string]*subscription),
+		inQueue: queue,
+	}
 }

@@ -16,22 +16,18 @@ type messageRef struct {
 	payload []byte
 }
 
-func newMessageRef(topic string, ts time.Time, seq uint64, payload []byte) messageRef {
-	return messageRef{
-		topic:   topic,
-		ts:      ts,
-		seq:     seq,
-		payload: payload,
+func makeMessage(topic string, mr messageRef, sub *subscription) Message {
+	msg := Message{
+		Topic:     topic,
+		Timestamp: mr.ts,
+		Seq:       mr.seq,
 	}
-}
-
-func newMessageRefCopy(topic string, ts time.Time, seq uint64, payload []byte) messageRef {
-	newPayload := make([]byte, len(payload))
-	copy(newPayload, payload)
-	return messageRef{
-		topic:   topic,
-		ts:      ts,
-		seq:     seq,
-		payload: newPayload,
+	if sub.cfg.Strategy == SubscriptionStrategyPayloadShared {
+		msg.Payload = mr.payload
+	} else {
+		buf := make([]byte, len(mr.payload))
+		copy(buf, mr.payload)
+		msg.Payload = buf
 	}
+	return msg
 }
