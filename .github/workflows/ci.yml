@@ -1,0 +1,23 @@
+name: thebus_ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: thebus_test
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v5
+      - name: Set up Go 1.24
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+      - run: go version
