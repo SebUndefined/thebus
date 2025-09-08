@@ -2,6 +2,7 @@ package thebus
 
 import "time"
 
+// Message represents a message delivered to a subscriber.
 type Message struct {
 	Topic     string
 	Timestamp time.Time
