@@ -22,8 +22,9 @@ type Config struct {
 	TopicIdleTTL          time.Duration // if Janitor enabled (0 = off)
 	JanitorInterval       time.Duration // 0 = off
 	IDGenerator           IDGenerator   // default to DefaultIDGenerator
+	CopyOnPublish         bool          // default false
 
-	// Default for subscribers (peuvent être override par Subscribe options)
+	// Default for subscribers (Can be overridden by sub)
 	DefaultSubBufferSize int                  // default: 128
 	DefaultSendTimeout   time.Duration        // default: 200ms
 	DefaultDropIfFull    bool                 // default: true
@@ -175,6 +176,12 @@ func WithPanicHandler(handler func(topic string, v any)) Option {
 func WithIDGenerator(IDGenerator IDGenerator) Option {
 	return func(cfg *Config) {
 		cfg.IDGenerator = IDGenerator
+	}
+}
+
+func WithCopyOnPublish(b bool) Option {
+	return func(cfg *Config) {
+		cfg.CopyOnPublish = b
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// Counters holds numeric counters for published, delivered, etc.
 type Counters struct {
 	Published uint64
 	Delivered uint64
@@ -12,6 +13,7 @@ type Counters struct {
 	Dropped   uint64
 }
 
+// StatsResults represents aggregated statistics of the bus.
 type StatsResults struct {
 	StartedAt   time.Time
 	Open        bool
@@ -21,6 +23,7 @@ type StatsResults struct {
 	PerTopic    map[string]TopicStats
 }
 
+// TopicStats represents statistics for a single topic.
 type TopicStats struct {
 	Subscribers int
 	Buffered    int

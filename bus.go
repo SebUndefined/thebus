@@ -20,6 +20,9 @@ type bus struct {
 
 var _ Bus = (*bus)(nil)
 
+// New creates a new Bus instance with the given options.
+// It applies default values, normalizes the configuration, and starts the bus in an open state.
+// The returned Bus is ready to accept Publish and Subscribe calls.
 func New(opts ...Option) (Bus, error) {
 	cfg := BuildConfig(opts...).Normalize()
 	b := &bus{
@@ -32,6 +35,7 @@ func New(opts ...Option) (Bus, error) {
 	return b, nil
 }
 
+// Publish a message on a specific topic. It returns a PublishAck and/or an error.
 func (b *bus) Publish(topic string, data []byte) (PublishAck, error) {
 	now := time.Now().UTC()
 	if len(strings.TrimSpace(topic)) == 0 {
@@ -40,59 +44,52 @@ func (b *bus) Publish(topic string, data []byte) (PublishAck, error) {
 	if !b.open.Load() {
 		return PublishAck{}, ErrClosed
 	}
-	subscribersCount := 0
-	var state *topicState
+	var ack PublishAck
+	var errOut error
 	err := b.withReadState(topic, func(st *topicState) error {
-		if st == nil {
+		if st == nil || len(st.subs) == 0 {
+			ack = PublishAck{Topic: topic, Enqueued: false, Subscribers: 0}
 			return nil
 		}
-		subscribersCount = len(st.subs)
-		state = st
+		seq := st.seq.Add(1)
+
+		payload := data
+		if b.cfg.CopyOnPublish {
+			cp := make([]byte, len(data))
+			copy(cp, data)
+			payload = cp
+		}
+
+		mr := messageRef{
+			topic:   topic,
+			ts:      now,
+			seq:     seq,
+			payload: payload,
+		}
+
+		select {
+		case st.inQueue <- mr:
+			st.counters.Published.Add(1)
+			b.totals.Published.Add(1)
+			ack = PublishAck{
+				Topic:       topic,
+				Enqueued:    true,
+				Subscribers: len(st.subs),
+			}
+		default:
+			ack = PublishAck{
+				Topic:       topic,
+				Enqueued:    false,
+				Subscribers: len(st.subs),
+			}
+			errOut = ErrQueueFull
+		}
 		return nil
 	})
 	if err != nil {
 		return PublishAck{}, err
 	}
-
-	if subscribersCount == 0 {
-		return PublishAck{
-			Topic:       topic,
-			Enqueued:    false,
-			Subscribers: subscribersCount,
-		}, nil
-	}
-
-	b.mutex.RLock() // protect against close
-	cur := b.subscriptions[topic]
-	if cur != state || cur == nil {
-		b.mutex.RUnlock()
-		return PublishAck{Topic: topic, Enqueued: false, Subscribers: subscribersCount}, nil
-	}
-	seq := state.seq.Add(1)
-	mr := messageRef{
-		topic:   topic,
-		ts:      now,
-		seq:     seq,
-		payload: data,
-	}
-	select {
-	case state.inQueue <- mr:
-		b.totals.Published.Add(1)
-		state.counters.Published.Add(1)
-		b.mutex.RUnlock()
-		return PublishAck{
-			Topic:       topic,
-			Enqueued:    true,
-			Subscribers: subscribersCount,
-		}, nil
-	default:
-		b.mutex.RUnlock()
-		return PublishAck{
-			Topic:       topic,
-			Enqueued:    false,
-			Subscribers: subscribersCount,
-		}, ErrQueueFull
-	}
+	return ack, errOut
 }
 
 func (b *bus) Subscribe(ctx context.Context, topic string, opts ...SubscribeOption) (Subscription, error) {
@@ -165,8 +162,31 @@ func (b *bus) buildUnsubscribeFunction(id string, topic string) func() error {
 }
 
 func (b *bus) Unsubscribe(topic string, subscriberID string) error {
-	//TODO implement me
-	panic("implement me")
+	// Standard check
+	if !b.open.Load() {
+		return nil
+	}
+	if len(strings.TrimSpace(topic)) == 0 {
+		return ErrInvalidTopic
+	}
+	b.mutex.RLock()
+	state, ok := b.subscriptions[topic]
+	if !ok {
+		b.mutex.RUnlock()
+		return nil
+	}
+	sub, ok := state.subs[subscriberID]
+	if !ok {
+		b.mutex.RUnlock()
+		return nil
+	}
+	b.mutex.RUnlock()
+	err := sub.unsubscribeFunc()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (b *bus) Close() error {

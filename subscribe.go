@@ -63,10 +63,15 @@ func (enum *SubscriptionStrategy) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Subscription represents a live subscription to a topic.
 type Subscription interface {
+	// GetID returns the unique ID of the subscription.
 	GetID() string
+	// GetTopic returns the topic name of the subscription.
 	GetTopic() string
+	// Read returns the channel from which messages can be consumed.
 	Read() <-chan Message
+	// Unsubscribe cancels the subscription.
 	Unsubscribe() error
 }
 
