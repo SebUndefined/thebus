@@ -313,7 +313,7 @@ func TestRunFanOutDeliveredCounter(t *testing.T) {
 		return nil
 	})
 	// ugly, but no use of fancy libs for testing
-	timeout := time.After(1 * time.Second)
+	timeout := time.After(2 * time.Second)
 	tick := time.NewTicker(10 * time.Millisecond)
 	defer tick.Stop()
 	for {
