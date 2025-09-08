@@ -1,6 +1,7 @@
 package thebus
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -293,41 +294,43 @@ func TestUnsubscribeKeepTopicWhenAutoDeleteDisabled(t *testing.T) {
 
 func TestRunFanOutDeliveredCounter(t *testing.T) {
 	b, _ := New()
-	bb := b.(*bus)
-	_ = bb.withWriteState("t", true, func(st *topicState) error {
-		st.subs["S"] = &subscription{subscriptionID: "S", messageChan: make(chan Message, 1)}
-		return nil
-	})
-	// push a message
-	_ = bb.withWriteState("t", true, func(st *topicState) error {
-		select {
-		case st.inQueue <- messageRef{
-			topic:   "t",
-			ts:      time.Now(),
-			seq:     0,
-			payload: []byte("test")}:
+	defer b.Close()
 
-		default:
-			t.Fatal("should not receive any messages")
-		}
-		return nil
-	})
-	// ugly, but no use of fancy libs for testing
-	timeout := time.After(2 * time.Second)
-	tick := time.NewTicker(10 * time.Millisecond)
-	defer tick.Stop()
+	// 1) Abonné réel (buffer 1, drop = true pour que l’envoi ne bloque pas)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sub, err := b.Subscribe(ctx, "t",
+		WithBufferSize(1),
+		WithDropIfFull(true),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := b.Publish("t", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for the read
+	select {
+	case <-sub.Read():
+		// ok
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting message")
+	}
+
+	// ugly but we wait for
+	deadline := time.Now().Add(2 * time.Second)
 	for {
-		select {
-		case <-timeout:
-			t.Fatal("timeout waiting for Delivered counter")
-		case <-tick.C:
-			bb.mutex.RLock()
-			delivered := bb.subscriptions["t"].counters.Delivered.Load()
-			bb.mutex.RUnlock()
-			if delivered >= 1 {
-				return // Test is ok if we catch this line
-			}
+		st, _ := b.Stats()
+		ts, ok := st.PerTopic["t"]
+		if ok && ts.Delivered >= 1 {
+			break
 		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected Delivered>=1, got %d", ts.Delivered)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
