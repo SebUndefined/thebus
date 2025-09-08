@@ -1,0 +1,77 @@
+name: Release on merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    env:
+      MODULE_PATH: ${{ github.repository }}
+    steps:
+      - name: Check out code into the Go module directory
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go 1.24
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.24"
+      - name: Decide bump from PR labels (default=patch)
+        id: decide
+        run: |
+            echo '${{ toJson(github.event.pull_request.labels) }}' > /tmp/labels.json
+            BUMP=patch
+            grep -qi 'release:major' /tmp/labels.json && BUMP=major
+            grep -qi 'release:minor' /tmp/labels.json && BUMP=minor
+            grep -qi 'release:patch' /tmp/labels.json && BUMP=patch
+            echo "bump=$BUMP" >> $GITHUB_OUTPUT
+            echo "BUMP=$BUMP"
+
+
+      - name: Run tests (race + coverage)
+        run: |
+            make fmt
+            make vet
+            make test-race-cover
+            go tool cover -func=coverage.out | tail -n1 || true
+
+      - name: Compute next semver tag
+        id: bump
+        shell: bash
+        run: |
+            set -euo pipefail
+            LAST_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo 'v0.1.0')"
+            echo "LAST_TAG=$LAST_TAG"
+            VER="${LAST_TAG#v}"
+            IFS='.' read -r MA MI PA <<< "$VER"
+            case "${{ steps.decide.outputs.bump }}" in
+              major) MA=$((MA+1)); MI=0; PA=0;;
+              minor) MI=$((MI+1)); PA=0;;
+              patch) PA=$((PA+1));;
+            esac
+            NEXT_TAG="v${MA}.${MI}.${PA}"
+            echo "next_tag=$NEXT_TAG" >> $GITHUB_OUTPUT
+            echo "NEXT_TAG=$NEXT_TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.next_tag }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prime Go proxy (make the tag discoverable)
+        run: |
+                MOD="github.com/${{ github.repository }}"
+                TAG="${{ steps.bump.outputs.next_tag }}"
+                GOPROXY=proxy.golang.org go list -m -versions "$MOD" || true
+                GOPROXY=proxy.golang.org go list -m "$MOD@$TAG" || true

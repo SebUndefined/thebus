@@ -305,20 +305,29 @@ func TestRunFanOutDeliveredCounter(t *testing.T) {
 			topic:   "t",
 			ts:      time.Now(),
 			seq:     0,
-			payload: nil}:
+			payload: []byte("test")}:
 
 		default:
 			t.Fatal("should not receive any messages")
 		}
 		return nil
 	})
-	time.Sleep(20 * time.Millisecond)
-	bb.mutex.RLock()
-	ts := bb.subscriptions["t"]
-	del := ts.counters.Delivered.Load()
-	bb.mutex.RUnlock()
-	if del < 1 {
-		t.Fatalf("expected Delivered>=1, got %d", del)
+	// ugly, but no use of fancy libs for testing
+	timeout := time.After(1 * time.Second)
+	tick := time.NewTicker(10 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case <-timeout:
+			t.Fatal("timeout waiting for Delivered counter")
+		case <-tick.C:
+			bb.mutex.RLock()
+			delivered := bb.subscriptions["t"].counters.Delivered.Load()
+			bb.mutex.RUnlock()
+			if delivered >= 1 {
+				return // Test is ok if we catch this line
+			}
+		}
 	}
 }
 
