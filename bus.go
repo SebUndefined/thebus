@@ -21,13 +21,7 @@ type bus struct {
 var _ Bus = (*bus)(nil)
 
 func New(opts ...Option) (Bus, error) {
-	cfg := DefaultConfig()
-	for _, opt := range opts {
-		opt(cfg)
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
+	cfg := BuildConfig(opts...).Normalize()
 	b := &bus{
 		startedAt:     time.Now(),
 		cfg:           cfg,
@@ -100,8 +94,8 @@ func (b *bus) buildUnsubscribeFunction(id string, topic string) func() error {
 		b.mutex.Lock()
 		if state, ok := b.subscriptions[topic]; ok {
 			delete(state.subs, id)
-			if len(state.subs) == 0 && len(state.inQueue) == 0 {
-				if state.closed.CompareAndSwap(false, true) { // ← garde-fou
+			if len(state.subs) == 0 && len(state.inQueue) == 0 && b.cfg.AutoDeleteEmptyTopics {
+				if state.closed.CompareAndSwap(false, true) {
 					close(state.inQueue)
 					delete(b.subscriptions, topic)
 				}
@@ -118,24 +112,72 @@ func (b *bus) Unsubscribe(topic string, subscriberID string) error {
 }
 
 func (b *bus) Close() error {
-	//TODO implement me
-	panic("implement me")
+	// refuse new publish and subscribe
+	if !b.open.CompareAndSwap(true, false) {
+		return nil
+	}
+	b.mutex.Lock()
+	states := make([]*topicState, 0, len(b.subscriptions))
+	for _, st := range b.subscriptions {
+		states = append(states, st)
+	}
+	// close the inQueue of each topic
+	for _, st := range states {
+		if st.closed.CompareAndSwap(false, true) { // ← idem ici
+			close(st.inQueue)
+		}
+	}
+	b.mutex.Unlock()
+
+	// Wait for the worker to stop
+	for _, st := range states {
+		st.wg.Wait()
+	}
+
+	// Cleaning memory
+	b.mutex.Lock()
+	b.subscriptions = make(map[string]*topicState) // reset propre
+	b.mutex.Unlock()
+
+	return nil
 }
 
 func (b *bus) Stats() (StatsResults, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (b *bus) snapshotState(topic string) (*topicState, int, bool) {
 	b.mutex.RLock()
-	subsCount := 0
-	st, ok := b.subscriptions[topic]
-	if ok {
-		subsCount = len(st.subs)
+	defer b.mutex.RUnlock()
+	perTopic := make(map[string]TopicStats, len(b.subscriptions))
+	subscriberCounts := 0
+	for topic, state := range b.subscriptions {
+		buffered := 0
+		for _, sub := range state.subs {
+			subscriberCounts++
+			buffered += len(sub.messageChan)
+		}
+		perTopic[topic] = TopicStats{
+			Subscribers: len(state.subs),
+			Buffered:    buffered,
+			Counters: Counters{
+				Published: state.counters.Published.Load(),
+				Delivered: state.counters.Delivered.Load(),
+				Failed:    state.counters.Failed.Load(),
+				Dropped:   state.counters.Dropped.Load(),
+			},
+		}
 	}
-	b.mutex.RUnlock()
-	return st, subsCount, ok
+	s := StatsResults{
+		StartedAt:   b.startedAt,
+		Open:        b.open.Load(),
+		Topics:      len(b.subscriptions),
+		Subscribers: subscriberCounts,
+		Totals: Counters{
+			Published: b.totals.Published.Load(),
+			Delivered: b.totals.Delivered.Load(),
+			Failed:    b.totals.Failed.Load(),
+			Dropped:   b.totals.Dropped.Load(),
+		},
+		PerTopic: perTopic,
+	}
+	return s, nil
 }
 
 func (b *bus) withReadState(topic string, callback func(st *topicState) error) error {

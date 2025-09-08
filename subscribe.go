@@ -1,10 +1,67 @@
 package thebus
 
 import (
+	"encoding/json"
+	"fmt"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// ##############################################################################
+// ##################################   ENUM   ##################################
+// ##############################################################################
+
+// SubscriptionStrategy define if the payload must be
+// shared by the subscribers (SubscriptionStrategyPayloadShared, the default)
+// or copied (SubscriptionStrategyPayloadClonedPerSubscriber)
+type SubscriptionStrategy string
+
+const (
+	SubscriptionStrategyUnknown                    SubscriptionStrategy = "UNKNOWN"
+	SubscriptionStrategyPayloadShared              SubscriptionStrategy = "PAYLOAD_SHARED"
+	SubscriptionStrategyPayloadClonedPerSubscriber SubscriptionStrategy = "PAYLOAD_CLONED_PER_SUBSCRIBER"
+)
+
+func (enum SubscriptionStrategy) String() string {
+	if len(strings.TrimSpace(string(enum))) == 0 {
+		return string(SubscriptionStrategyUnknown)
+	}
+	return string(enum)
+}
+
+func SubscriptionStrategyValues() []SubscriptionStrategy {
+	return []SubscriptionStrategy{
+		SubscriptionStrategyPayloadShared,
+		SubscriptionStrategyPayloadClonedPerSubscriber,
+	}
+}
+
+func (enum SubscriptionStrategy) IsValid() bool {
+	if slices.Contains(SubscriptionStrategyValues(), enum) {
+		return true
+	}
+	return false
+}
+
+func (enum SubscriptionStrategy) MarshalJSON() ([]byte, error) {
+	return []byte(fmt.Sprintf(`"%s"`, enum)), nil
+}
+
+func (enum *SubscriptionStrategy) UnmarshalJSON(data []byte) error {
+	var tmp string
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	fs := SubscriptionStrategy(tmp)
+	if !fs.IsValid() {
+		fs = SubscriptionStrategyUnknown
+	}
+	*enum = fs
+	return nil
+}
 
 type Subscription interface {
 	GetID() string

@@ -1,69 +1,14 @@
 package thebus
 
 import (
-	"encoding/json"
-	"fmt"
-	"slices"
-	"strings"
 	"time"
 )
 
 const (
 	DefaultTopicQueueSize = 1024
+	DefaultSubBufferSize  = 128
+	DefaultSendTimeout    = 200 * time.Millisecond
 )
-
-// ##############################################################################
-// ##################################   ENUM   ##################################
-// ##############################################################################
-
-// SubscriptionStrategy define if the payload must be
-// shared by the subscribers (SubscriptionStrategyPayloadShared, the default)
-// or copied (SubscriptionStrategyPayloadClonedPerSubscriber)
-type SubscriptionStrategy string
-
-const (
-	SubscriptionStrategyUnknown                    SubscriptionStrategy = "UNKNOWN"
-	SubscriptionStrategyPayloadShared              SubscriptionStrategy = "PAYLOAD_SHARED"
-	SubscriptionStrategyPayloadClonedPerSubscriber SubscriptionStrategy = "PAYLOAD_CLONED_PER_SUBSCRIBER"
-)
-
-func (enum SubscriptionStrategy) String() string {
-	if len(strings.TrimSpace(string(enum))) == 0 {
-		return string(SubscriptionStrategyUnknown)
-	}
-	return string(enum)
-}
-
-func SubscriptionStrategyValues() []SubscriptionStrategy {
-	return []SubscriptionStrategy{
-		SubscriptionStrategyPayloadShared,
-		SubscriptionStrategyPayloadClonedPerSubscriber,
-	}
-}
-
-func (enum SubscriptionStrategy) IsValid() bool {
-	if slices.Contains(SubscriptionStrategyValues(), enum) {
-		return true
-	}
-	return false
-}
-
-func (enum SubscriptionStrategy) MarshalJSON() ([]byte, error) {
-	return []byte(fmt.Sprintf(`"%s"`, enum)), nil
-}
-
-func (enum *SubscriptionStrategy) UnmarshalJSON(data []byte) error {
-	var tmp string
-	if err := json.Unmarshal(data, &tmp); err != nil {
-		return err
-	}
-	fs := SubscriptionStrategy(tmp)
-	if !fs.IsValid() {
-		fs = SubscriptionStrategyUnknown
-	}
-	*enum = fs
-	return nil
-}
 
 // ##############################################################################
 // ################################   CONFIG   ##################################
@@ -94,17 +39,52 @@ type Config struct {
 	PanicHandler func(topic string, v any) // default: nil (no recover)
 }
 
+func (cfg *Config) Normalize() *Config {
+	if cfg.TopicQueueSize <= 0 {
+		cfg.TopicQueueSize = DefaultTopicQueueSize
+	}
+	if cfg.TopicIdleTTL < 0 {
+		cfg.TopicIdleTTL = 0
+	}
+	if cfg.JanitorInterval < 0 {
+		cfg.JanitorInterval = 0
+	}
+	if cfg.IDGenerator == nil {
+		cfg.IDGenerator = DefaultIDGenerator
+	}
+	if cfg.DefaultSubBufferSize <= 0 {
+		cfg.DefaultSubBufferSize = DefaultSubBufferSize
+	}
+	if cfg.DefaultSendTimeout <= 0 {
+		cfg.DefaultSendTimeout = DefaultSendTimeout
+	}
+	if !cfg.DefaultStrategy.IsValid() {
+		cfg.DefaultStrategy = SubscriptionStrategyPayloadShared
+	}
+	if cfg.MaxTopics < 0 {
+		cfg.MaxTopics = 0
+	}
+	if cfg.MaxSubscribersPerTopic < 0 {
+		cfg.MaxSubscribersPerTopic = 0
+	}
+	if cfg.Logger == nil {
+		cfg.Logger = &noopLogger{}
+	}
+	return cfg
+}
+
 func DefaultConfig() *Config {
 	return &Config{
 		TopicQueueSize:        DefaultTopicQueueSize,
 		AutoDeleteEmptyTopics: true,
 		TopicIdleTTL:          0 * time.Second,
 		JanitorInterval:       0 * time.Second,
-		DefaultSubBufferSize:  128,
-		DefaultSendTimeout:    200 * time.Millisecond,
+		DefaultSubBufferSize:  DefaultSubBufferSize,
+		DefaultSendTimeout:    DefaultSendTimeout,
 		DefaultDropIfFull:     true,
 		DefaultStrategy:       SubscriptionStrategyPayloadShared,
 		IDGenerator:           DefaultIDGenerator,
+		Logger:                NoopLogger(),
 	}
 }
 
@@ -120,9 +100,9 @@ func WithTopicQueueSize(size int) Option {
 	}
 }
 
-func WithAutoDeleteEmptyTopics() Option {
+func WithAutoDeleteEmptyTopics(b bool) Option {
 	return func(cfg *Config) {
-		cfg.AutoDeleteEmptyTopics = true
+		cfg.AutoDeleteEmptyTopics = b
 	}
 }
 
@@ -161,6 +141,19 @@ func WithDefaultStrategy(strategy SubscriptionStrategy) Option {
 		cfg.DefaultStrategy = strategy
 	}
 }
+
+func WithMaxTopics(max int) Option {
+	return func(cfg *Config) {
+		cfg.MaxTopics = max
+	}
+}
+
+func WithMaxSubscribersPerTopic(max int) Option {
+	return func(cfg *Config) {
+		cfg.MaxSubscribersPerTopic = max
+	}
+}
+
 func WithLogger(logger Logger) Option {
 	return func(cfg *Config) {
 		cfg.Logger = logger
@@ -183,13 +176,6 @@ func WithIDGenerator(IDGenerator IDGenerator) Option {
 	return func(cfg *Config) {
 		cfg.IDGenerator = IDGenerator
 	}
-}
-
-func (cfg *Config) Validate() error {
-	if cfg.IDGenerator == nil {
-		return ErrIDGeneratorNotSet
-	}
-	return nil
 }
 
 func BuildConfig(opts ...Option) *Config {
