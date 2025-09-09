@@ -92,6 +92,20 @@ kind of in-process system (adding config, per subscriber strategy...)
 - Clean abstractions with good defaults
 - Plays well with tests, mocks, and small services
 
+## 📈 Benchmark
+
+```shell
+go test -bench=. -benchmem -benchtime=2s ./...
+goos: darwin
+goarch: arm64
+pkg: github.com/sebundefined/thebus
+cpu: Apple M4 Pro
+BenchmarkBus_Publish_NoSubscriber-14                   	62964634	        38.04 ns/op	6729.34 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBus_Publish_CopyOnPublish_NoSubscriber-14     	62382220	        38.36 ns/op	6673.82 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBus_Publish_OneSubscriber-14                  	60785077	        40.02 ns/op	6397.49 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBus_Publish_CopyOnPublish_OneSubscriber-14    	60166773	        39.96 ns/op	6406.85 MB/s	       0 B/op	       0 allocs/op
+```
+
 ## 🧪 Testing
 
 Run the full suite:
