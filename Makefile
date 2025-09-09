@@ -20,3 +20,9 @@ test-race: ## run tests with race detector
 
 test-race-cover: ## run tests with race detector and coverage
 	go test -race -count=1 -coverprofile=coverage.out ./...
+
+test-bench: ## run benchmark tests
+	go test -bench -v ./...
+
+test-bench-mem: ## with mem and allocation
+	go test -bench=. -benchmem -benchtime=2s ./...
